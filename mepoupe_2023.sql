@@ -55,3 +55,133 @@ insert into registro_deposito values(1,2,'2020-03-19 16:10:00', 40);
 insert into registro_deposito values(2,2,'2020-04-22 19:15:00', 800);
 
 select * from registro_deposito;
+
+insert into cliente values
+(3,'Bora Bill','12334566788','M','1979-06-31', '3499887766','borabill@gmail.com'),
+(4,'Receba','11233455677','M','2000-08-26', '1199112233','receba@gmail.com');
+
+insert into conta_corrente values (3,'2020-07-10 10:00:00', 300,'Ativa',3);
+insert into conta_corrente values (4,'2020-07-11 11:00:00', 1000,'Ativa',4);
+
+insert into registro_deposito values 
+(3,3,'2020-07-10 10:30:00', 200),
+(4,3,'2020-07-10 11:00:00', 100),
+(5,4,'2020-07-11 12:00:00', 500),
+(6,4,'2020-07-12 09:00:00', 500),
+(7,4,'2020-07-12 10:00:00', 100),
+(8,4,'2020-07-12 11:00:00', 200);
+
+insert into registro_saque values 
+(3,3,'2020-07-10 12:00:00', 50),
+(4,3,'2020-07-10 13:00:00', 100),
+(5,4,'2020-07-12 12:00:00', 300),
+(6,4,'2020-07-12 13:00:00', 400);
+
+-- ex 02
+
+delimiter //
+
+create procedure sp_insere_cli(
+in p_nome varchar(50),
+in p_cpf char(11),
+in p_sexo char(1),
+in p_dt_nasc date,
+in p_telefone char(15),
+in p_email varchar(100)
+)
+begin
+if p_nome is null or p_cpf is null or p_sexo is null or p_dt_nasc is null or p_telefone is null or p_email is null then
+signal sqlstate '45000' set message_text = 'Todos os campos devem ser preenchidos.';
+else
+insert into cliente (nome, CPF, sexo, dt_nasc, telefone, email)
+values (p_nome, p_cpf, p_sexo, p_dt_nasc, p_telefone, p_email);
+end if;
+end //
+
+delimiter ;
+
+-- ex 03
+
+create table registro_transferencia (
+    cod_transferencia int auto_increment,
+    cod_conta_origem int,
+    cod_conta_destino int,
+    valor_transferencia numeric(9,2),
+    dt_hora_transferencia datetime,
+    primary key (cod_transferencia)
+);
+
+delimiter //
+
+create procedure sp_registra_transferencia(
+in p_cod_conta_origem int,
+in p_cod_conta_destino int,
+in p_valor_transferencia numeric(9,2)
+)
+begin
+declare v_saldo_origem numeric(9,2);
+
+select saldo into v_saldo_origem
+from conta_corrente
+where cod_conta = p_cod_conta_origem;
+
+if v_saldo_origem >= p_valor_transferencia then
+start transaction;
+        
+update conta_corrente
+set saldo = saldo - p_valor_transferencia
+where cod_conta = p_cod_conta_origem;
+        
+update conta_corrente
+set saldo = saldo + p_valor_transferencia
+where cod_conta = p_cod_conta_destino;
+        
+insert into registro_transferencia (cod_conta_origem, cod_conta_destino, valor_transferencia, dt_hora_transferencia)
+values (p_cod_conta_origem, p_cod_conta_destino, p_valor_transferencia, now());
+
+commit;
+else
+signal sqlstate '45000' set message_text = 'Saldo insuficiente para realizar a transferência.';
+end if;
+end //
+
+delimiter ;
+
+-- ex 04
+
+delimiter //
+create procedure sp_relatorio_depositos_periodo(
+in p_data_inicial date,
+in p_data_final date
+)
+begin
+select c.nome as nome_cliente, cc.cod_conta, sum(rd.valor_deposito) as total_depositos
+from cliente c
+join conta_corrente cc on c.cod_cliente = cc.cod_cliente
+join registro_deposito rd on cc.cod_conta = rd.cod_conta
+where rd.dt_deposito between p_data_inicial and p_data_final
+group by c.nome, cc.cod_conta
+order by total_depositos desc;
+end//
+
+-- ex 05
+
+create procedure sp_relatorio_anual(
+in p_ano int,
+in p_codigo_relatorio int
+)
+begin
+if p_codigo_relatorio = 1 then
+select cod_conta, month(dt_saque) as mes, sum(valor_saque) as total_saques
+from registro_saque
+where year(dt_saque) = p_ano
+group by cod_conta, month(dt_saque);
+elseif p_codigo_relatorio = 2 then
+select cod_conta, month(dt_deposito) as mes, sum(valor_deposito) as total_depositos
+from registro_deposito
+where year(dt_deposito) = p_ano
+group by cod_conta, month(dt_deposito);
+else
+signal sqlstate '45000' set message_text = 'Código de relatório inválido.';
+end if;
+end //
