@@ -56,6 +56,8 @@ insert into registro_deposito values(2,2,'2020-04-22 19:15:00', 800);
 
 select * from registro_deposito;
 
+-- lista de exercicios procedures
+
 insert into cliente values
 (3,'Bora Bill','12334566788','M','1979-06-31', '3499887766','borabill@gmail.com'),
 (4,'Receba','11233455677','M','2000-08-26', '1199112233','receba@gmail.com');
@@ -185,3 +187,101 @@ else
 signal sqlstate '45000' set message_text = 'Código de relatório inválido.';
 end if;
 end //
+
+-- lista de exercicios triggers e funções
+
+-- ex 01
+create table tb_red_clients (
+    cod_cliente int,
+    nome varchar(100),
+    cpf varchar(11),
+    numero_conta int,
+    data_entrada_vermelho date,
+    data_saida_vermelho date,
+    valor_taxa decimal(10, 2)
+);
+
+delimiter //
+
+-- ex 01
+create or replace trigger tr_red_clients
+before insert on registro_saque
+for each row
+begin
+    declare v_saldo_atual decimal(10, 2);
+    declare v_nome varchar(100);
+    declare v_cpf varchar(11);
+    declare v_conta_aberta int;
+    
+    select saldo into v_saldo_atual from conta_corrente where cod_conta = new.cod_conta;
+    
+    if (v_saldo_atual - new.valor_saque) < -200 then
+        signal sqlstate '45000' set message_text = 'saque não permitido: saldo insuficiente com limite de r$ 200 no vermelho';
+    end if;
+
+    update conta_corrente
+    set saldo = saldo - new.valor_saque
+    where cod_conta = new.cod_conta;
+
+    select count(*) into v_conta_aberta 
+    from tb_red_clients 
+    where numero_conta = new.cod_conta 
+      and data_saida_vermelho is null;
+
+    if (v_saldo_atual >= 0 and (v_saldo_atual - new.valor_saque) < 0 and v_conta_aberta = 0) then
+        select nome, cpf into v_nome, v_cpf from cliente where cod_cliente = (select cod_cliente from conta_corrente where cod_conta = new.cod_conta);
+        insert into tb_red_clients (cod_cliente, nome, cpf, numero_conta, data_entrada_vermelho, data_saida_vermelho, valor_taxa)
+        values ((select cod_cliente from conta_corrente where cod_conta = new.cod_conta), v_nome, v_cpf, new.cod_conta, curdate(), null, null);
+    end if;
+end;
+//
+
+delimiter ;
+
+-- ex 02
+delimiter //
+
+create or replace function func_calcula_valor_taxa (
+    p_data_inicio date,
+    p_data_fim date
+) returns decimal(10, 2)
+begin
+    declare v_dias_diff int;
+    declare v_taxa decimal(10, 2);
+    
+    set v_dias_diff = datediff(p_data_fim, p_data_inicio);
+    set v_taxa = v_dias_diff * 5;
+    return v_taxa;
+end;
+//
+
+delimiter ;
+
+-- ex 03
+delimiter //
+
+create or replace trigger tr_redout_clients
+before insert on registro_deposito
+for each row
+begin
+    declare v_saldo_atual decimal(10, 2);
+    declare v_data_entrada date;
+    declare v_taxa decimal(10, 2);
+    
+    select saldo into v_saldo_atual from conta_corrente where cod_conta = new.cod_conta;
+
+    update conta_corrente
+    set saldo = saldo + new.valor_deposito
+    where cod_conta = new.cod_conta;
+
+    if (v_saldo_atual < 0 and (v_saldo_atual + new.valor_deposito) >= 0) then
+        select data_entrada_vermelho into v_data_entrada from tb_red_clients where numero_conta = new.cod_conta and data_saida_vermelho is null;
+        set v_taxa = func_calcula_valor_taxa(v_data_entrada, curdate());
+        update tb_red_clients
+        set data_saida_vermelho = curdate(), valor_taxa = v_taxa
+        where numero_conta = new.cod_conta and data_saida_vermelho is null;
+    end if;
+end;
+//
+
+delimiter ;
